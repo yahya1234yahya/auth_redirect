@@ -6,40 +6,42 @@
     <title>42 OAuth Redirect</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             margin: 0;
             padding: 20px;
             min-height: 100vh;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
         }
         .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             text-align: center;
             max-width: 400px;
-            padding: 40px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            width: 100%;
         }
-        .logo {
+        .success {
+            color: #22c55e;
             font-size: 24px;
-            font-weight: bold;
             margin-bottom: 20px;
+        }
+        .loading {
             color: #3b82f6;
+            font-size: 18px;
+            margin-bottom: 20px;
         }
         .spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
             width: 40px;
             height: 40px;
-            border: 4px solid rgba(59, 130, 246, 0.3);
-            border-top: 4px solid #3b82f6;
-            border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 20px auto;
+            margin: 0 auto 20px;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
@@ -47,65 +49,139 @@
         }
         .error {
             color: #ef4444;
+            font-size: 18px;
+        }
+        .instructions {
+            color: #6b7280;
+            font-size: 14px;
             margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="logo">1337 EVENT.HUB</div>
-        <div class="spinner"></div>
-        <p>Redirecting back to app...</p>
-        <div id="error" class="error" style="display: none;"></div>
+        <div id="loading">
+            <div class="spinner"></div>
+            <div class="loading">Processing authentication...</div>
+            <div class="instructions">Please wait while we complete your 42 login.</div>
+        </div>
+        
+        <div id="success" style="display: none;">
+            <div class="success">✅ Authentication Successful!</div>
+            <div class="instructions">
+                You can now close this tab and return to the app.
+                <br><br>
+                <small>This window will automatically close in 3 seconds.</small>
+            </div>
+        </div>
+        
+        <div id="error" style="display: none;">
+            <div class="error">❌ Authentication Failed</div>
+            <div class="instructions" id="error-message">
+                Please close this tab and try again in the app.
+            </div>
+        </div>
     </div>
 
     <script>
-        function redirectToApp() {
-            try {
-                // Get the URL parameters
-                const urlParams = new URLSearchParams(window.location.search);
-                const code = urlParams.get('code');
-                const error = urlParams.get('error');
-                const state = urlParams.get('state');
+        // Parse URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const error = urlParams.get('error');
+        const sessionId = urlParams.get('session') || urlParams.get('state');
 
-                if (error) {
-                    throw new Error(`OAuth error: ${error}`);
+        // Backend configuration - try both local and production URLs
+        const BACKEND_URLS = [
+            'http://localhost:5000',     // Local development
+            'http://192.168.1.100:5000', // Local network (example)
+            'https://http://10.32.129.236:3001' // Production (replace with actual URL)
+        ];
+
+        console.log('Redirect page loaded with:', { code: !!code, error, sessionId });
+
+        if (error) {
+            showError(`OAuth Error: ${error}`);
+            return;
+        }
+
+        if (!code) {
+            showError('No authorization code received.');
+            return;
+        }
+
+        if (!sessionId) {
+            showError('No session ID received.');
+            return;
+        }
+
+        // Store the auth code in the backend
+        storeAuthCode(code, sessionId);
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error-message').innerHTML = message + '<br>Please close this tab and try again in the app.';
+        }
+
+        function showSuccess() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('success').style.display = 'block';
+            
+            // Auto-close after 3 seconds
+            setTimeout(() => {
+                window.close();
+            }, 3000);
+        }
+
+        async function storeAuthCode(code, sessionId) {
+            let stored = false;
+            
+            // Try each backend URL until one works
+            for (const baseUrl of BACKEND_URLS) {
+                try {
+                    console.log(`Trying to store auth code at: ${baseUrl}`);
+                    
+                    const response = await fetch(`${baseUrl}/api/users/auth/42/store`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            sessionId: sessionId,
+                            code: code
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('✅ Auth code stored successfully:', data);
+                        stored = true;
+                        break;
+                    } else {
+                        console.log(`❌ Failed to store auth code at ${baseUrl}:`, response.status);
+                    }
+                } catch (e) {
+                    console.log(`❌ Network error with ${baseUrl}:`, e.message);
                 }
+            }
 
-                if (!code) {
-                    throw new Error('No authorization code received');
-                }
-
-                // Create the deep link back to your app
-                const deepLink = `hackathon://auth?code=${encodeURIComponent(code)}${state ? '&state=' + encodeURIComponent(state) : ''}`;
-                
-                console.log('Redirecting to:', deepLink);
-
-                // Try to redirect to the app
-                window.location.href = deepLink;
-
-                // Fallback: show instructions if redirect doesn't work
-                setTimeout(() => {
-                    document.querySelector('.container').innerHTML = `
-                        <div class="logo">1337 EVENT.HUB</div>
-                        <p>✅ Authentication successful!</p>
-                        <p>If the app didn't open automatically, please open your app manually.</p>
-                        <p style="font-size: 12px; margin-top: 20px; opacity: 0.7;">
-                            Code: ${code.substring(0, 20)}...
-                        </p>
-                    `;
-                }, 3000);
-
-            } catch (err) {
-                console.error('Redirect error:', err);
-                document.getElementById('error').style.display = 'block';
-                document.getElementById('error').textContent = err.message;
-                document.querySelector('.spinner').style.display = 'none';
+            if (stored) {
+                showSuccess();
+            } else {
+                showError('Failed to store authentication code. Please ensure your backend is running.');
             }
         }
 
-        // Run the redirect when the page loads
-        window.addEventListener('load', redirectToApp);
+        // Fallback: Try to open deep link as well
+        try {
+            const deepLinkUrl = `hackathon://auth?code=${encodeURIComponent(code)}&session=${encodeURIComponent(sessionId)}`;
+            console.log('Attempting deep link:', deepLinkUrl);
+            
+            // Try to open the deep link (may not work but worth trying)
+            window.location.href = deepLinkUrl;
+        } catch (e) {
+            console.log('Deep link not available:', e);
+        }
     </script>
 </body>
 </html> 
